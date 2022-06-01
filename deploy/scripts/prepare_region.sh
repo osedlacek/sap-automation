@@ -37,6 +37,7 @@ source "${script_directory}/helpers/script_helpers.sh"
 
 force=0
 recover=0
+ado_flag=""
 
 INPUT_ARGUMENTS=$(getopt -n prepare_region -o d:l:s:c:p:t:a:ifohrv --longoptions deployer_parameter_file:,library_parameter_file:,subscription:,spn_id:,spn_secret:,tenant_id:,storageaccountname:,auto-approve,force,only_deployer,help,recover,ado -- "$@")
 VALID_ARGUMENTS=$?
@@ -67,11 +68,13 @@ do
     esac
 done
 
+echo "ADO flag ${ado_flag}"
+
 this_ip=$(curl -s ipinfo.io/ip) >/dev/null 2>&1
 root_dirname=$(pwd)
 
 if [ -n "$approve" ]; then
-    approveparam=" -i"
+    approveparam=" --auto-approve"
 fi
 
 if [ ! -f "$deployer_parameter_file" ]; then
@@ -97,6 +100,7 @@ fi
 # Check that parameter files have environment and location defined
 validate_key_parameters "$deployer_parameter_file"
 if [ 0 != $return_code ]; then
+    echo "Errors in parameter file" > "${deployer_config_information}".err
     exit $return_code
 fi
 
@@ -109,12 +113,10 @@ automation_config_directory=~/.sap_deployment_automation
 generic_config_information="${automation_config_directory}"/config
 deployer_config_information="${automation_config_directory}"/"${environment}""${region_code}"
 
-
 if [ $force == 1 ]; then
     if [ -f "${deployer_config_information}" ]; then
         rm "${deployer_config_information}"
     fi
-    
 fi
 
 init "${automation_config_directory}" "${generic_config_information}" "${deployer_config_information}"
@@ -127,6 +129,7 @@ fi
 validate_exports
 return_code=$?
 if [ 0 != $return_code ]; then
+    echo "Missing exports" > "${deployer_config_information}".err
     exit $return_code
 fi
 
@@ -158,6 +161,9 @@ if [ -n "${subscription}" ]; then
         echo -e "#   The provided subscription is not valid:$boldred ${val} $resetformatting#   "
         echo "#                                                                                       #"
         echo "#########################################################################################"
+
+        echo "The provided subscription is not valid: ${subscription}" > "${deployer_config_information}".err
+
         exit 65
     fi
     echo ""
@@ -214,7 +220,8 @@ if [ 0 == $step ]; then
     "${DEPLOYMENT_REPO_PATH}"/deploy/scripts/install_deployer.sh $allParams
     return_code=$?
     if [ 0 != $return_code ]; then
-        exit $return_code
+        echo "Bootstrapping of the deployer failed" > "${deployer_config_information}".err
+        exit 10
     fi
     
     #Persist the parameters
@@ -358,6 +365,7 @@ if [ 1 == $step ]; then
             "${DEPLOYMENT_REPO_PATH}"/deploy/scripts/set_secrets.sh $allParams
             return_code=$?
             if [ 0 != $return_code ]; then
+                echo "Could not set the secrets in key vault" > "${deployer_config_information}".err
                 exit $return_code
             fi
         else
@@ -395,6 +403,8 @@ if [ 1 == $step ]; then
         echo -e "#$boldred User account ${val} does not have access to: $keyvault  $resetformatting"
         echo "#                                                                                       #"
         echo "#########################################################################################"
+        echo "User account ${val} does not have access to: $keyvault" > "${deployer_config_information}".err
+
         exit 65
         
     fi
@@ -427,7 +437,8 @@ if [ 2 == $step ]; then
     "${DEPLOYMENT_REPO_PATH}"/deploy/scripts/install_library.sh $allParams
     return_code=$?
     if [ 0 != $return_code ]; then
-        exit $return_code
+        echo "Bootstrapping of the SAP Library failed" > "${deployer_config_information}".err
+        exit 20
     fi
     
     cd "${curdir}" || exit
@@ -465,11 +476,15 @@ if [ 3 == $step ]; then
         rm post_deployment.sh
     fi
     allParams=$(printf " --parameterfile %s --storageaccountname %s --type sap_deployer %s %s " "${deployer_file_parametername}" "${REMOTE_STATE_SA}" "${approveparam}" "${ado_flag}" )
+
+    echo "calling installer.sh with parameters: $allParams"
     
     "${DEPLOYMENT_REPO_PATH}"/deploy/scripts/installer.sh $allParams
     return_code=$?
     if [ 0 != $return_code ]; then
-        exit $return_code
+        echo "Migrating the deployer state failed" > "${deployer_config_information}".err
+
+        exit 11
     fi
     
     cd "${curdir}" || exit
@@ -500,7 +515,9 @@ if [ 4 == $step ]; then
     "${DEPLOYMENT_REPO_PATH}"/deploy/scripts/installer.sh $allParams
     return_code=$?
     if [ 0 != $return_code ]; then
-        exit $return_code
+        echo "Migrating the SAP Library state failed" > "${deployer_config_information}".err
+
+        exit 21
     fi
     
     cd "$root_dirname" || exit
@@ -522,6 +539,9 @@ echo "#     - Storage Account: ${storage_account}                       #"
 echo "#                                                                                       #"
 echo "#########################################################################################"
 
+if [ -f "${deployer_config_information}".err ]; then
+    "${deployer_config_information}".err
+fi
 
 now=$(date)
 cat <<EOF > "${deployer_config_information}".md
@@ -547,19 +567,6 @@ export deployer_ip="${deployer_public_ip_address}"
 export terraform_state_storage_account="${REMOTE_STATE_SA}"
 
 if [ 5 == $step ]; then
-    
-    key=$(az keyvault secret show --vault-name "${keyvault}" --name "sapbits-access-key" | jq -r .value)
-    end=$(date -u -d "180 days" '+%Y-%m-%dT%H:%MZ')
-    
-    sas=$(az storage container generate-sas --permissions rl --account-name ${REMOTE_STATE_SA} --name 'sapbits' --https-only  --expiry $end -o tsv --account-key "${key}")
-    
-    az keyvault secret set --vault-name "${keyvault}" --name "sapbits-sas-token" --value  "?${sas}"
-    
-    step=6
-    save_config_var "step" "${deployer_config_information}"
-fi
-
-if [ 6 == $step ]; then
     cd "${curdir}" || exit
     
     load_config_vars "${deployer_config_information}" "sshsecret"

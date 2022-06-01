@@ -4,9 +4,28 @@ Description:
   Output from sap_deployer module.
 */
 
+###############################################################################
+#                                                                             # 
+#                             Resource Group                                  # 
+#                                                                             # 
+###############################################################################
+
+output "created_resource_group_id" {
+  description = "Created resource group ID"
+  value = local.resource_group_exists ? data.azurerm_resource_group.deployer[0].id : azurerm_resource_group.deployer[0].id
+}
+
+output "created_resource_group_subscription_id" {
+  description = "Created resource group' subscription ID"
+  value = local.resource_group_exists ? (
+    split("/",data.azurerm_resource_group.deployer[0].id))[2] : (
+    split("/",azurerm_resource_group.deployer[0].id)[2]
+  )
+}
+
 // Deployer resource group name
 output "deployer_rg_name" {
-  value = local.rg_exists ? data.azurerm_resource_group.deployer[0].name : azurerm_resource_group.deployer[0].name
+  value = local.resource_group_exists ? data.azurerm_resource_group.deployer[0].name : azurerm_resource_group.deployer[0].name
 }
 
 // Unique ID for deployer
@@ -21,12 +40,12 @@ output "vnet_mgmt_id" {
 
 // Details of management subnet that is deployed/imported
 output "subnet_mgmt_id" {
-  value = local.sub_mgmt_exists ? data.azurerm_subnet.subnet_mgmt[0].id : azurerm_subnet.subnet_mgmt[0].id
+  value = local.management_subnet_exists ? data.azurerm_subnet.subnet_mgmt[0].id : azurerm_subnet.subnet_mgmt[0].id
 }
 
 // Details of the management vnet NSG that is deployed/imported
 output "nsg_mgmt" {
-  value = local.sub_mgmt_nsg_exists ? data.azurerm_network_security_group.nsg_mgmt[0] : azurerm_network_security_group.nsg_mgmt[0]
+  value = local.management_subnet_nsg_exists ? data.azurerm_network_security_group.nsg_mgmt[0] : azurerm_network_security_group.nsg_mgmt[0]
 }
 
 // Details of the user assigned identity for deployer(s)
@@ -44,12 +63,12 @@ output "random_id" {
 }
 
 output "user_vault_name" {
-  value = local.user_kv_exist ? data.azurerm_key_vault.kv_user[0].name : azurerm_key_vault.kv_user[0].name
+  value = local.user_keyvault_exist ? data.azurerm_key_vault.kv_user[0].name : azurerm_key_vault.kv_user[0].name
 }
 
 # TODO Add this back when we separate the usage
 # output "prvt_vault_name" {
-#   value = local.prvt_kv_exist ? data.azurerm_key_vault.kv_prvt[0].name : azurerm_key_vault.kv_prvt[0].name
+#   value = local.automation_keyvault_exist ? data.azurerm_key_vault.kv_prvt[0].name : azurerm_key_vault.kv_prvt[0].name
 # }
 
 // output the secret name of private key
@@ -77,8 +96,8 @@ output "deployer_user" {
 }
 */
 
-output "deployer_kv_user_arm_id" {
-  value = local.user_kv_exist ? data.azurerm_key_vault.kv_user[0].id : azurerm_key_vault.kv_user[0].id
+output "deployer_keyvault_user_arm_id" {
+  value = local.user_keyvault_exist ? data.azurerm_key_vault.kv_user[0].id : azurerm_key_vault.kv_user[0].id
 }
 
 output "deployer_public_ip_address" {

@@ -59,8 +59,8 @@ management_firewall_subnet_address_prefix="10.12.20.0/26"
 # deployer_disk_type is optional and defines the virtual machine disk type
 #deployer_disk_type"="Premium_LRS"
 
-# use_DHCP is a boolean flag controlling if Azure subnet provided IP addresses should be used (true)
-#use_DHCP=false
+# deployer_use_DHCP is a boolean flag controlling if Azure subnet provided IP addresses should be used (true)
+#deployer_use_DHCP = true
 
 # private_ip_address if defined will provide the IP addresses for the network interface cards 
 #private_ip_address=""
@@ -76,6 +76,9 @@ management_firewall_subnet_address_prefix="10.12.20.0/26"
 #    "sku"             ="18.04-LTS"
 #    "version"         ="latest"
 #}
+
+# deployer_diagnostics_account_arm_id defines the diagnosting storage account for the deployer
+#deployer_diagnostics_account_arm_id = ""
 
 
 /*
@@ -135,3 +138,7 @@ enable_purge_control_for_keyvaults=false
 
 # use_private_endpoint is a boolean flag controlling if the keyvaults and storage accounts have private endpoints
 # use_private_endpoint=false
+
+# auto_configure_deployer is a boolean flag controlling if the automation should try to configure the deployer automatically
+# set to false if outbound internet on the deployer is not available
+auto_configure_deployer = true

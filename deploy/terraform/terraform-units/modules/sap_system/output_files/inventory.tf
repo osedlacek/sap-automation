@@ -46,7 +46,7 @@ resource "local_file" "ansible_inventory_new_yml" {
     webservers          = length(local.ips_web) > 0 ? var.naming.virtualmachine_names.WEB_COMPUTERNAME : [],
     prefix              = var.naming.prefix.SDU,
     separator           = var.naming.separator,
-    platform            = lower(var.platform)
+    platform            = var.shared_home ? format("%s-multi-sid", lower(var.platform)) : lower(var.platform),
     dbconnection        = var.platform == "SQLSERVER" ? "winrm" : "ssh"
     scsconnection       = upper(var.app_tier_os_types["scs"]) == "LINUX" ? "ssh" : "winrm"
     ersconnection       = upper(var.app_tier_os_types["scs"]) == "LINUX" ? "ssh" : "winrm"
@@ -60,6 +60,9 @@ resource "local_file" "ansible_inventory_new_yml" {
     ansible_user        = var.ansible_user
     db_supported_tiers  = local.db_supported_tiers
     scs_supported_tiers = local.scs_supported_tiers
+    ips_observers       = var.observer_ips
+    observers           = length(var.observer_ips) > 0 ? var.naming.virtualmachine_names.OBSERVER_COMPUTERNAME : [],
+
     }
   )
   filename             = format("%s/%s_hosts.yaml", path.cwd, var.sap_sid)
@@ -89,10 +92,38 @@ resource "local_file" "sap-parameters_yml" {
       format("sap_trans:                     %s", var.sap_transport)) : (
       ""
     )
-    platform            = var.platform
-    scs_instance_number = var.scs_instance_number
+    platform = var.platform
+    scs_instance_number = (local.app_server_count + local.scs_server_count) == 0 ? (
+      "01") : (
+      var.scs_instance_number
+    )
     ers_instance_number = var.ers_instance_number
-    install_path        = var.install_path
+    install_path = length(trimspace(var.install_path)) > 0 ? (
+      format("usr_sap_install_mountpoint:    %s", var.install_path)) : (
+      ""
+    )
+    NFS_provider        = var.NFS_provider
+    pas_instance_number = local.pas_instance_number
+
+    oracle = local.oracle
+
+    hana_data = length(try(var.hana_data[0], "")) > 1 ? (
+      format("hana_data_mountpoint:          %s", jsonencode(var.hana_data))) : (
+      ""
+    )
+    hana_log = length(try(var.hana_log[0], "")) > 1 ? (
+      format("hana_log_mountpoint:           %s", jsonencode(var.hana_log))) : (
+      ""
+    )
+    hana_shared = length(try(var.hana_shared[0], "")) > 1 ? (
+      format("hana_shared_mountpoint:        %s", jsonencode(var.hana_shared))) : (
+      ""
+    )
+
+    usr_sap = length(var.usr_sap) > 1 ? (
+      format("usr_sap_mountpoint:            %s", var.usr_sap)) : (
+      ""
+    )
 
     }
   )
@@ -165,6 +196,14 @@ locals {
 
   bom = trimspace(coalesce(var.bom_name, lookup(local.itemvalues, "bom_base_name", ""), " "))
 
-  token = lookup(local.itemvalues, "sapbits_sas_token", "")
+  token            = lookup(local.itemvalues, "sapbits_sas_token", "")
+  ora_release      = lookup(local.itemvalues, "ora_release", "")
+  ora_version      = lookup(local.itemvalues, "ora_version", "")
+  oracle_sbp_patch = lookup(local.itemvalues, "oracle_sbp_patch", "")
+
+  oracle = upper(var.platform) == "ORACLE" ? (
+    format("ora_release: %s\nora_version: %s\noracle_sbp_patch: %s\n", local.ora_release, local.ora_version, local.oracle_sbp_patch)) : (
+    ""
+  )
 }
 

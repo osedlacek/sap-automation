@@ -6,78 +6,100 @@
 # |                                                                            |
 # +------------------------------------4--------------------------------------*/
 ---
-- name:                                Debug
-  ansible.builtin.debug:
-    var:                               bom_processing
-    verbosity:                         2
+- name:                                "0.4 Installation Media: - Retrieve Deployer Keyvault details"
+  block:
 
-- name:                                Workload Keyvault name
-  ansible.builtin.set_fact:
-    workload_kv_name:                  "{{ kv_name }}"
+    - name:                            Check required variables are present and not empty
+      ansible.builtin.assert:
+        that:
+          - "kv_name is defined"                    # Has the variable been defined
+          - "kv_name | type_debug != 'NoneType'"    # and given a value
+          - "kv_name | string | length != 0 "       # Detect null values
+        fail_msg:                          "Please define the kv_name parameter"
 
-- name:                                Get Deployer Keyvault name from keyvault
-  ansible.builtin.command: >-
+    - name:                            "0.4 Installation Media: - Get Deployer key vault name workload zone key vault"
+      ansible.builtin.command: >-
                                        az keyvault secret show
-                                         --vault-name {{ workload_kv_name }}
-                                         --name deployer-kv-name
-  changed_when:                        false
-  register:                            deployer_kv_name_secret
-  when:                                bom_processing is not defined
+                                         --vault-name {{ kv_name }}
+                                         --name {{ deployer_kv_name_secret }}
+      changed_when:                    false
+      register:                        deployer_kv_name_secret
+      when:                            bom_processing is not defined
 
-- name:                                Save Deployer Keyvault name
-  ansible.builtin.set_fact:
-    deployer_kv_name:                  "{{ kv_name }}"
-  when:                                bom_processing is defined
-
-- name:                                Save Deployer Keyvault name
-  ansible.builtin.set_fact:
-    deployer_kv_name: >-
+    - name:                            "0.4 Installation Media: - Save Deployer key vault name"
+      ansible.builtin.set_fact:
+        deployer_kv_name: >-
                                        {{ (deployer_kv_name_secret.stdout | from_json).value }}
-  when:                                bom_processing is not defined
+  when: deployer_kv_name is not defined
 
-
-- name:                                Debug, Deployer Keyvault
-  ansible.builtin.debug:
-    var:                               deployer_kv_name
-    verbosity:                         2
-
-- name:                                Extract SAP Binaries Storage Account information
-  ansible.builtin.command: >-
+- name:                                "0.4 Installation Media: - Extract SAP Binaries Storage Account secrets"
+  block:
+    - name:                            "0.4 Installation Media: - Extract SAP Binaries Storage Account information"
+      ansible.builtin.command: >-
                                        az keyvault secret show
                                          --vault-name {{ deployer_kv_name }}
                                          --name {{ sapbits_location_secret }}
-  changed_when:                        false
-  register:                            sapbits_location_base_path_secret
-  no_log:                              false
+      changed_when:                    false
+      register:                        sapbits_location_base_path_secret
+      no_log:                          false
 
-- name:                                Save SAP Binaries Storage Account information
-  ansible.builtin.set_fact:
-    sapbits_location_base_path: >-
+    - name:                            "0.4 Installation Media: - Save SAP Binaries Storage Account information"
+      ansible.builtin.set_fact:
+        sapbits_location_base_path: >-
                                        {{ (sapbits_location_base_path_secret.stdout | from_json).value }}
+  when:                                sapbits_location_base_path is not defined
 
-- name:                                Debug, storage account
+- name:                                "0.4 Installation Media: - Retrieve Access Key secret"
+  block:
+    - name:                            "0.4 Installation Media: - Retrieve Access Key details"
+      ansible.builtin.command: >-
+        az keyvault secret show
+          --vault-name {{ deployer_kv_name }}
+          --name "sapbits-access-key"
+      changed_when:                    false
+      register:                        keyvault_secret_show_accesskey
+      no_log:                          true
+
+    - name:                            "0.4 Installation Media: - Extract Access Key details"
+      ansible.builtin.set_fact:
+        sapbits_access_key: >-
+          {{ (keyvault_secret_show_accesskey.stdout | from_json).value }}
+      no_log:                          true
+  when:
+    - sapbits_access_key is not defined
+
+- name:                                "0.4 Installation Media: - Extract SAP Binaries Storage Account SAS secret"
+  block:
+
+    - name:                            "0.4 Installation Media: - Set Expiry"
+      ansible.builtin.command:         "date +'%Y-%m-%d' -d '+3 days'"
+      register: expiry
+
+    - name:                            "0.4 Installation Media: - Create SAP Binaries Storage Account SAS"
+      ansible.builtin.shell: >-
+                                       az storage account generate-sas \
+                                         --services b \
+                                         --resource-types sco \
+                                         --permissions rl \
+                                         --account-name {{ sapbits_location_base_path.rpartition('//')[2].split('.')[0] }} \
+                                         --account-key {{ sapbits_access_key }} \
+                                         --auth-mode login \
+                                         --expiry {{expiry.stdout}} \
+                                         | tr -d \"
+      changed_when:                    false
+      register:                        az_sapbits_sas_token
+
+    - name:                            "0.4 Installation Media: - Extract SAP Binaries Storage Account SAS (temp)"
+      ansible.builtin.set_fact:
+        sapbits_sas_token: >-
+                                       {{ az_sapbits_sas_token.stdout }}
+
+- name:                                "0.4 Installation Media: - Debug storage account details"
   ansible.builtin.debug:
-    var:                               sapbits_location_base_path
-    verbosity:                         2
-
-
-- name:                                Extract SAP Binaries Storage Account SAS
-  ansible.builtin.command: >-
-                                       az keyvault secret show
-                                         --vault-name {{ deployer_kv_name }}
-                                         --name {{ sapbits_sas_token_secret }}
-  changed_when:                        false
-  register:                            sapbits_sas_token_secret
-
-- name:                                Extract SAP Binaries Storage Account SAS
-  ansible.builtin.set_fact:
-    sapbits_sas_token: >-
-                                       {{ (sapbits_sas_token_secret.stdout | from_json).value }}
-  no_log:                              false
-
-- name:                                Debug, SAS Token
-  ansible.builtin.debug:
-    var:                               sapbits_sas_token
+    msg:
+      - "KEYVAULT:     {{ deployer_kv_name }}"
+      - "URL     :     {{ sapbits_location_base_path }}"
+      - "SAS     :     {{ sapbits_sas_token }}"
     verbosity:                         2
 
 ...

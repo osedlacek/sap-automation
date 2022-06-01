@@ -12,12 +12,15 @@ resetformatting="\e[0m"
 full_script_path="$(realpath "${BASH_SOURCE[0]}")"
 script_directory="$(dirname "${full_script_path}")"
 
-#call stack has full scriptname when using source 
+#call stack has full scriptname when using source
 source "${script_directory}/deploy_utils.sh"
+
+#helper files
+source "${script_directory}/helpers/script_helpers.sh"
 
 #Internal helper functions
 function showhelp {
-
+    
     echo ""
     echo "#########################################################################################"
     echo "#                                                                                       #"
@@ -79,22 +82,22 @@ INPUT_ARGUMENTS=$(getopt -n remover -o p:o:t:s:hi --longoptions type:,parameterf
 VALID_ARGUMENTS=$?
 
 if [ "$VALID_ARGUMENTS" != "0" ]; then
-  showhelp
+    showhelp
 fi
 
 eval set -- "$INPUT_ARGUMENTS"
 while :
 do
-  case "$1" in
-    -p | --parameterfile)                      parameterfile="$2"               ; shift 2 ;;
-    -o | --storageaccountname)                 REMOTE_STATE_SA="$2"             ; shift 2 ;;
-    -s | --state_subscription)                 STATE_SUBSCRIPTION="$2"          ; shift 2 ;;
-    -t | --type)                               deployment_system="$2"           ; shift 2 ;;
-    -i | --auto-approve)                       approve="--auto-approve"         ; shift ;;
-    -h | --help)                               showhelp 
-                                               exit 3                           ; shift ;;
-    --) shift; break ;;
-  esac
+    case "$1" in
+        -p | --parameterfile)                      parameterfile="$2"               ; shift 2 ;;
+        -o | --storageaccountname)                 REMOTE_STATE_SA="$2"             ; shift 2 ;;
+        -s | --state_subscription)                 STATE_SUBSCRIPTION="$2"          ; shift 2 ;;
+        -t | --type)                               deployment_system="$2"           ; shift 2 ;;
+        -i | --auto-approve)                       approve="--auto-approve"         ; shift ;;
+        -h | --help)                               showhelp
+        exit 3                           ; shift ;;
+        --) shift; break ;;
+    esac
 done
 
 #variables
@@ -124,7 +127,20 @@ if [ "${parameterfile_dirname}" != "${working_directory}" ]; then
     exit 3
 fi
 
-if [ ! -n "${deployment_system}" ]; then
+if [ ! -f "${parameterfile}" ]
+then
+    printf -v val %-35.35s "$parameterfile"
+    echo ""
+    echo "#########################################################################################"
+    echo "#                                                                                       #"
+    echo -e "#                 $boldred  Parameter file does not exist: ${val} $resetformatting #"
+    echo "#                                                                                       #"
+    echo "#########################################################################################"
+    exit 2 #No such file or directory
+fi
+
+
+if [ -z "${deployment_system}" ]; then
     printf -v val %-40.40s "$deployment_system"
     echo "#########################################################################################"
     echo "#                                                                                       #"
@@ -141,60 +157,51 @@ if [ ! -n "${deployment_system}" ]; then
     exit 64 #script usage wrong
 fi
 
-ext=$(echo ${parameterfile_name} | cut -d. -f2)
+# Check that the exports ARM_SUBSCRIPTION_ID and DEPLOYMENT_REPO_PATH are defined
+validate_exports
+return_code=$?
+if [ 0 != $return_code ]; then
+    exit $return_code
+fi
 
-# Helper variables
-if [ "${ext}" == json ]; then
-    environment=$(jq --raw-output .infrastructure.environment "${parameterfile_dirname}"/"${parameterfile_name}")
-    region=$(jq --raw-output .infrastructure.region "${parameterfile_dirname}"/"${parameterfile_name}")
+# Check that Terraform and Azure CLI is installed
+validate_dependencies
+return_code=$?
+if [ 0 != $return_code ]; then
+    exit $return_code
+fi
+
+# Check that parameter files have environment and location defined
+validate_key_parameters "$parameterfile_name"
+return_code=$?
+if [ 0 != $return_code ]; then
+    exit $return_code
+fi
+
+if valid_region_name "${region}" ; then
+    # Convert the region to the correct code
+    get_region_code ${region}
 else
-    load_config_vars "${parameterfile_dirname}"/"${parameterfile_name}" "environment"
-    load_config_vars "${parameterfile_dirname}"/"${parameterfile_name}" "location"
-    region=$(echo "${location}" | xargs)
+    echo "Invalid region: $region"
+    exit 2
 fi
 
-if [ ! -n "${environment}" ]; then
-    echo "#########################################################################################"
-    echo "#                                                                                       #"
-    echo -e "#                          $boldred Incorrect parameter file. $resetformatting                                  #"
-    echo "#                                                                                       #"
-    echo "#     The file needs to contain the infrastructure.environment attribute!!              #"
-    echo "#                                                                                       #"
-    echo "#########################################################################################"
-    echo ""
-    exit 65 #data format error
-fi
+this_ip=$(curl -s ipinfo.io/ip) >/dev/null 2>&1
 
-if [ ! -n "${region}" ]; then
-    echo "#########################################################################################"
-    echo "#                                                                                       #"
-    echo -e "#                          $boldred Incorrect parameter file. $resetformatting                                  #"
-    echo "#                                                                                       #"
-    echo "#       The file needs to contain the infrastructure.region attribute!!                 #"
-    echo "#                                                                                       #"
-    echo "#########################################################################################"
-    echo ""
-    exit 65 #data format error
-fi
+echo "Deployer environment: $deployer_environment"
 
+this_ip=$(curl -s ipinfo.io/ip) >/dev/null 2>&1
+export TF_VAR_Agent_IP=$this_ip
+echo "Agent IP: $this_ip"
 
-if [ ! -f "${parameterfile}" ]; then
-    printf -v val %-40.40s "$parameterfile"
-    echo ""
-    echo "#########################################################################################"
-    echo "#                                                                                       #"
-    echo -e "#              $boldred Parameter file does not exist: ${val} $resetformatting#"
-    echo "#                                                                                       #"
-    echo "#########################################################################################"
-    exit 2 #No such file or directory
-fi
-
-# Convert the region to the correct code
-get_region_code $region
 
 automation_config_directory=~/.sap_deployment_automation
 generic_config_information="${automation_config_directory}"/config
 system_config_information="${automation_config_directory}"/"${environment}""${region_code}"
+
+echo "Configuration file: $system_config_information"
+echo "Deployment region: $region"
+echo "Deployment region code: $region_code"
 
 key=$(echo "${parameterfile_name}" | cut -d. -f1)
 
@@ -236,55 +243,11 @@ fi
 
 tfstate_parameter=" -var tfstate_resource_id=${tfstate_resource_id}"
 
-if [ ! -n "${DEPLOYMENT_REPO_PATH}" ]; then
-    option="DEPLOYMENT_REPO_PATH"
-    missing
-    exit -1
-fi
-
-# Checking for valid az session
-az account show >stdout.az 2>&1
-temp=$(grep "az login" stdout.az)
-if [ -n "${temp}" ]; then
-    echo ""
-    echo "#########################################################################################"
-    echo "#                                                                                       #"
-    echo -e "#                          $boldred Please login using az login $resetformatting                                #"
-    echo "#                                                                                       #"
-    echo "#########################################################################################"
-    echo ""
-    if [ -f stdout.az ]; then
-        rm stdout.az
-    fi
-    exit 67 #addressee unknown
-else
-    if [ -f stdout.az ]; then
-        rm stdout.az
-    fi
-
-fi
-
-account_set=0
-
-cloudIDUsed=$(az account show | grep "cloudShellID")
-if [ ! -z "${cloudIDUsed}" ];
-then 
-    echo ""
-    echo "#########################################################################################"
-    echo "#                                                                                       #"
-    echo -e "#         $boldred Please login using your credentials or service principal credentials! $resetformatting       #"
-    echo "#                                                                                       #"
-    echo "#########################################################################################"
-    echo ""
-    exit 67                                                                                             #addressee unknown
-fi
-
 #setting the user environment variables
 set_executing_user_environment_variables "none"
 
-if [ ! -z "${STATE_SUBSCRIPTION}" ]; then
-    $(az account set --sub "${STATE_SUBSCRIPTION}")
-    account_set=1
+if [ -n "${STATE_SUBSCRIPTION}" ]; then
+    az account set --sub "${STATE_SUBSCRIPTION}"
 fi
 
 export TF_DATA_DIR="${parameterfile_dirname}"/.terraform
@@ -323,68 +286,84 @@ echo "#                                                                         
 echo "#########################################################################################"
 echo ""
 
-terraform -chdir="${terraform_module_directory}" init -upgrade=true -reconfigure \
---backend-config "subscription_id=${STATE_SUBSCRIPTION}" \
---backend-config "resource_group_name=${REMOTE_STATE_RG}" \
---backend-config "storage_account_name=${REMOTE_STATE_SA}" \
---backend-config "container_name=tfstate" \
+terraform -chdir="${terraform_module_directory}" init  -reconfigure \
+--backend-config "subscription_id=${STATE_SUBSCRIPTION}"          \
+--backend-config "resource_group_name=${REMOTE_STATE_RG}"         \
+--backend-config "storage_account_name=${REMOTE_STATE_SA}"        \
+--backend-config "container_name=tfstate"                         \
 --backend-config "key=${key}.terraform.tfstate"
 
 
-echo ""
-echo "#########################################################################################"
-echo "#                                                                                       #"
-echo -e "#                            $cyan Running Terraform destroy$resetformatting                                 #"
-echo "#                                                                                       #"
-echo "#########################################################################################"
-echo ""
+created_resource_group_id=$(terraform -chdir="${terraform_module_directory}" output created_resource_group_id | tr -d \")
+created_resource_group_id_length=$(expr length "$created_resource_group_id")
+created_resource_group_subscription_id=$(terraform -chdir="${terraform_module_directory}" output created_resource_group_subscription_id | tr -d \")
+created_resource_group_subscription_id_length=$(expr length "$created_resource_group_subscription_id")
 
-#TODO:
-#create retire_region.sh for deleting the deployer and the library in a proper way
-#terraform doesn't seem to tokenize properly when we pass a full string
-if [ "$deployment_system" == "sap_deployer" ]; then
-    terraform -chdir="${terraform_bootstrap_directory}" refresh -var-file="${var_file}" \
-        $deployer_tfstate_key_parameter
-
-    echo -e "#$cyan processing $deployment_system removal as defined in $parameterfile_name $resetformatting"
-    terraform -chdir="${terraform_module_directory}" destroy -var-file="${var_file}" \
-        $deployer_tfstate_key_parameter
-
-elif [ "$deployment_system" == "sap_library" ]; then
-    echo -e "#$cyan processing $deployment_system removal as defined in $parameterfile_name $resetformatting"
-
-    terraform_bootstrap_directory="${DEPLOYMENT_REPO_PATH}/deploy/terraform/bootstrap/${deployment_system}/"
-    if [ ! -d "${terraform_bootstrap_directory}" ]; then
-        printf -v val %-40.40s "$terraform_bootstrap_directory"
-        echo "#########################################################################################"
-        echo "#                                                                                       #"
-        echo -e "#  $boldred Unable to find bootstrap directory: ${val}$resetformatting#"
-        echo "#                                                                                       #"
-        echo "#########################################################################################"
-        echo ""
-        exit 66 #cannot open input file/folder
-    fi
-    terraform -chdir="${terraform_bootstrap_directory}" init -upgrade=true -force-copy
-
-    terraform -chdir="${terraform_bootstrap_directory}" refresh -var-file="${var_file}" \
-        $landscape_tfstate_key_parameter \
-        $deployer_tfstate_key_parameter
-
-    terraform -chdir="${terraform_bootstrap_directory}" destroy -var-file="${var_file}" ${approve} \
-        $landscape_tfstate_key_parameter \
-        $deployer_tfstate_key_parameter
+if [ "${created_resource_group_id_length}" -eq 0 ] && [ "${created_resource_group_subscription_id_length}" -eq 0 ]; then
+    resource_group_exist=$(az group exists --name "${created_resource_group_id}" --subscription "${created_resource_group_subscription_id}")
 else
-    terraform -chdir="${terraform_module_directory}" refresh -var-file="${var_file}" \
-        $tfstate_parameter \
-        $landscape_tfstate_key_parameter \
-        $deployer_tfstate_key_parameter
-
-    echo -e "#$cyan processing $deployment_system removal as defined in $parameterfile_name $resetformatting"
-    terraform -chdir="${terraform_module_directory}" destroy -var-file="${var_file}" ${approve} \
-        $tfstate_parameter \
-        $landscape_tfstate_key_parameter \
-        $deployer_tfstate_key_parameter
+    resource_group_exist=true
 fi
+
+if [ $resource_group_exist ];
+then
+    echo ""
+    echo "#########################################################################################"
+    echo "#                                                                                       #"
+    echo -e "#                            $cyan Running Terraform destroy$resetformatting                                 #"
+    echo "#                                                                                       #"
+    echo "#########################################################################################"
+    echo ""
+    
+    if [ "$deployment_system" == "sap_deployer" ]; then
+        terraform -chdir="${terraform_bootstrap_directory}" refresh -var-file="${var_file}" \
+        $deployer_tfstate_key_parameter
+        
+        echo -e "#$cyan processing $deployment_system removal as defined in $parameterfile_name $resetformatting"
+        terraform -chdir="${terraform_module_directory}" destroy -var-file="${var_file}" \
+        $deployer_tfstate_key_parameter
+        
+        elif [ "$deployment_system" == "sap_library" ]; then
+        echo -e "#$cyan processing $deployment_system removal as defined in $parameterfile_name $resetformatting"
+        
+        terraform_bootstrap_directory="${DEPLOYMENT_REPO_PATH}/deploy/terraform/bootstrap/${deployment_system}/"
+        if [ ! -d "${terraform_bootstrap_directory}" ]; then
+            printf -v val %-40.40s "$terraform_bootstrap_directory"
+            echo "#########################################################################################"
+            echo "#                                                                                       #"
+            echo -e "#  $boldred Unable to find bootstrap directory: ${val}$resetformatting#"
+            echo "#                                                                                       #"
+            echo "#########################################################################################"
+            echo ""
+            exit 66 #cannot open input file/folder
+        fi
+        terraform -chdir="${terraform_bootstrap_directory}" init -upgrade=true -force-copy
+        
+        terraform -chdir="${terraform_bootstrap_directory}" refresh -var-file="${var_file}" \
+        $landscape_tfstate_key_parameter \
+        $deployer_tfstate_key_parameter
+        
+        terraform -chdir="${terraform_bootstrap_directory}" destroy -var-file="${var_file}" ${approve} \
+        $landscape_tfstate_key_parameter \
+        $deployer_tfstate_key_parameter
+    else
+        terraform -chdir="${terraform_module_directory}" refresh -var-file="${var_file}" \
+        $tfstate_parameter \
+        $landscape_tfstate_key_parameter \
+        $deployer_tfstate_key_parameter
+        
+        echo -e "#$cyan processing $deployment_system removal as defined in $parameterfile_name $resetformatting"
+        terraform -chdir="${terraform_module_directory}" destroy -var-file="${var_file}" ${approve} \
+        $tfstate_parameter \
+        $landscape_tfstate_key_parameter \
+        $deployer_tfstate_key_parameter
+    fi
+    
+    
+else
+    return_value=0
+fi
+
 
 if [ "${deployment_system}" == sap_deployer ]; then
     sed -i /deployer_tfstate_key/d "${system_config_information}"
@@ -402,4 +381,4 @@ fi
 
 unset TF_DATA_DIR
 
-exit 0
+exit $return_value

@@ -39,10 +39,14 @@ function load_config_vars() {
     if [[ ! -f "${var_file}" ]]; then
         return
     fi
-    
     for var_name; do # iterate over function params
-        # NOTE: Should we care if we fail to retrieve a value from the file?
-        var_value="$(grep -m1 "^${var_name}=" "${var_file}" | cut -d'=' -f2 | tr -d '"')"
+            # NOTE: Should we care if we fail to retrieve a value from the file?
+        var_value="$(grep -m1 "^${var_name}=" "${var_file}" | cut -d'=' -f2  | tr -d ' ' | tr -d '"')"
+        
+        if [ -z "${var_value}" ]
+        then
+          var_value="$(grep -m1 "^${var_name} " "${var_file}" | cut -d'=' -f2  | tr -d ' ' | tr -d '"')"
+        fi
         
         # NOTE: this continue means we skip setting an empty value for a variable
         # whose value is empty in the var_file...
@@ -296,7 +300,7 @@ function set_executing_user_environment_variables() {
         az_user_name=$(az ad signed-in-user show --query userPrincipalName -o tsv)
         
         # this is the user object id but exporeted as client_id to make it easier to use in TF
-        export TF_VAR_arm_client_id=${az_user_obj_id}
+        export TF_VAR_Agent_IP=${az_user_obj_id}
         
         echo -e "\t[set_executing_user_environment_variables]: logged in user objectID: ${az_user_obj_id} (${az_user_name})"
         echo -e "\t[set_executing_user_environment_variables]: Initializing state with user: ${az_user_name}"
@@ -392,6 +396,7 @@ function get_region_code() {
         "canadaeast")         export region_code="CAEA" ;;
         "centralindia")       export region_code="CEIN" ;;
         "centralus")          export region_code="CEUS" ;;
+        "centraluseuap")      export region_code="CEUA" ;;
         "eastasia")           export region_code="EAAS" ;;
         "eastus")             export region_code="EAUS" ;;
         "eastus2")            export region_code="EUS2" ;;
@@ -401,6 +406,8 @@ function get_region_code() {
         "germanywestcentral") export region_code="GEWC" ;;
         "japaneast")          export region_code="JAEA" ;;
         "japanwest")          export region_code="JAWE" ;;
+        "jioindiacentral")    export region_code="JINC" ;;
+        "jioindiawest")       export region_code="JINW" ;;
         "koreacentral")       export region_code="KOCE" ;;
         "koreasouth")         export region_code="KOSO" ;;
         "northcentralus")     export region_code="NCUS" ;;
@@ -410,6 +417,7 @@ function get_region_code() {
         "southafricanorth")   export region_code="SANO" ;;
         "southafricawest")    export region_code="SAWE" ;;
         "southcentralus")     export region_code="SCUS" ;;
+        "southcentralusstg")  export region_code="SCUG" ;;
         "southeastasia")      export region_code="SOEA" ;;
         "southindia")         export region_code="SOIN" ;;
         "swedencentral")      export region_code="SECE" ;;

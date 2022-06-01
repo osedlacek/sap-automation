@@ -1,120 +1,4 @@
 
-variable "anchor_vm" {
-  description = "Deployed anchor VM"
-}
-
-variable "resource_group" {
-  description = "Details of the resource group"
-}
-
-variable "storage_bootdiag_endpoint" {
-  description = "Details of the boot diagnostics storage account"
-}
-
-variable "ppg" {
-  description = "Details of the proximity placement group"
-}
-
-variable "naming" {
-  description = "Defines the names for the resources"
-}
-
-variable "custom_disk_sizes_filename" {
-  type        = string
-  description = "Disk size json file"
-  default     = ""
-}
-
-variable "admin_subnet" {
-  description = "Information about SAP admin subnet"
-}
-
-variable "db_subnet" {
-  description = "Information about SAP db subnet"
-}
-
-variable "storage_subnet" {
-  description = "Information about storage subnet"
-}
-
-variable "sid_kv_user_id" {
-  description = "Details of the user keyvault for sap_system"
-}
-
-variable "sdu_public_key" {
-  description = "Public key used for authentication"
-}
-
-variable "sid_password" {
-  description = "SDU password"
-}
-
-variable "sid_username" {
-  description = "SDU username"
-}
-
-variable "sap_sid" {
-  description = "The SID of the application"
-}
-
-
-variable "db_asg_id" {
-  description = "Database Application Security Group"
-}
-
-variable "deployment" {
-  description = "The type of deployment"
-}
-
-variable "terraform_template_version" {
-  description = "The version of Terraform templates that were identified in the state file"
-}
-
-variable "cloudinit_growpart_config" {
-  description = "A cloud-init config that configures automatic growpart expansion of root partition"
-}
-
-variable "license_type" {
-  description = "Specifies the license type for the OS"
-  default     = ""
-}
-
-variable "use_loadbalancers_for_standalone_deployments" {
-  description = "Defines if load balancers are used even for standalone deployments"
-  default     = true
-}
-
-variable "hana_dual_nics" {
-  description = "Defines if the HANA DB uses dual network interfaces"
-  default     = true
-}
-
-
-variable "database_vm_names" {
-  default = [""]
-}
-
-variable "database_vm_db_nic_ips" {
-  default = [""]
-}
-
-variable "database_vm_admin_nic_ips" {
-  default = [""]
-}
-
-variable "database_vm_storage_nic_ips" {
-  default = [""]
-}
-
-variable "database_server_count" {
-  default = 1
-}
-
-variable   "order_deployment" {
-  description = "psuedo condition for ordering deployment"
-  default     = ""
-}
-
 locals {
   // Resources naming
   computer_names       = var.naming.virtualmachine_names.HANA_COMPUTERNAME
@@ -138,15 +22,27 @@ locals {
 
   sizes = jsondecode(file(local.file_name))
 
-  faults = jsondecode(file(format("%s%s", path.module, "/../../../../../configs/max_fault_domain_count.json")))
+  faults = jsondecode(file(
+    format("%s%s",
+      path.module,
+      "/../../../../../configs/max_fault_domain_count.json"
+    )
+  ))
 
   region    = var.infrastructure.region
   sid       = upper(var.sap_sid)
   prefix    = trimspace(var.naming.prefix.SDU)
-  rg_exists = length(try(var.infrastructure.resource_group.arm_id, "")) > 0
-  rg_name = local.rg_exists ? (
+  resource_group_exists = length(try(var.infrastructure.resource_group.arm_id, "")) > 0
+  rg_name = local.resource_group_exists ? (
     try(split("/", var.infrastructure.resource_group.arm_id)[4], "")) : (
-    coalesce(try(var.infrastructure.resource_group.name, ""), format("%s%s", local.prefix, local.resource_suffixes.sdu_rg))
+    coalesce(
+      try(var.infrastructure.resource_group.name, ""),
+      format("%s%s%s",
+        var.naming.resource_prefixes.sdu_rg,
+        local.prefix,
+        local.resource_suffixes.sdu_rg
+      )
+    )
   )
 
   hdb_list = [
@@ -185,12 +81,39 @@ locals {
   // If custom image is used, we do not overwrite os reference with default value
   hdb_custom_image = length(try(local.hdb.os.source_image_id, "")) > 0
   hdb_os = {
-    os_type         = "LINUX"
-    source_image_id = local.hdb_custom_image ? local.hdb.os.source_image_id : ""
-    publisher       = local.hdb_custom_image ? "" : length(try(local.hdb.os.publisher, "")) > 0 ? local.hdb.os.publisher : "SUSE"
-    offer           = local.hdb_custom_image ? "" : length(try(local.hdb.os.offer, "")) > 0 ? local.hdb.os.offer : "sles-sap-12-sp5"
-    sku             = local.hdb_custom_image ? "" : length(try(local.hdb.os.sku, "")) > 0 ? local.hdb.os.sku : "gen1"
-    version         = local.hdb_custom_image ? "" : length(try(local.hdb.os.version, "")) > 0 ? local.hdb.os.version : "latest"
+    os_type = "LINUX"
+    source_image_id = local.hdb_custom_image ? (
+      local.hdb.os.source_image_id) : (
+      ""
+    )
+    publisher = local.hdb_custom_image ? (
+      "") : (
+      length(try(local.hdb.os.publisher, "")) > 0 ? (
+        local.hdb.os.publisher) : (
+        "SUSE"
+      )
+    )
+    offer = local.hdb_custom_image ? (
+      "") : (
+      length(try(local.hdb.os.offer, "")) > 0 ? (
+        local.hdb.os.offer) : (
+        "sles-sap-12-sp5"
+      )
+    )
+    sku = local.hdb_custom_image ? (
+      "") : (
+      length(try(local.hdb.os.sku, "")) > 0 ? (
+        local.hdb.os.sku) : (
+        "gen2"
+      )
+    )
+    version = local.hdb_custom_image ? (
+      "") : (
+      length(try(local.hdb.os.version, "")) > 0 ? (
+        local.hdb.os.version) : (
+        "latest"
+      )
+    )
   }
 
   hdb_size = try(local.hdb.size, "Default")
@@ -211,9 +134,9 @@ locals {
     "username" = var.sid_username
     "password" = var.sid_password
   }
-  
-  enable_db_lb_deployment = var.database_server_count > 0 && (var.use_loadbalancers_for_standalone_deployments || var.database_server_count > 1)
 
+  enable_db_lb_deployment = var.database_server_count > 0 && (
+  var.use_loadbalancers_for_standalone_deployments || var.database_server_count > 1)
 
   hdb_ins = try(local.hdb.instance, {})
   hdb_sid = try(local.hdb_ins.sid, local.sid) // HANA database sid from the Databases array for use as reference to LB/AS
@@ -261,7 +184,10 @@ locals {
     [
       for storage_type in local.db_sizing : [
         for idx, disk_count in range(storage_type.count) : {
-          suffix                    = format("-%s%02d", storage_type.name, disk_count + var.options.resource_offset)
+          suffix = format("-%s%02d",
+            storage_type.name,
+            disk_count + var.options.resource_offset
+          )
           storage_account_type      = storage_type.disk_type,
           disk_size_gb              = storage_type.size_gb,
           disk_iops_read_write      = try(storage_type.disk-iops-read-write, null)
@@ -300,7 +226,10 @@ locals {
     [
       for storage_type in local.db_sizing : [
         for idx, disk_count in range(storage_type.count) : {
-          suffix                    = format("-%s%02d", storage_type.name, disk_count + var.options.resource_offset)
+          suffix = format("-%s%02d",
+            storage_type.name,
+            disk_count + var.options.resource_offset
+          )
           storage_account_type      = storage_type.disk_type,
           disk_size_gb              = storage_type.size_gb,
           disk_iops_read_write      = try(storage_type.disk-iops-read-write, null)
@@ -316,7 +245,9 @@ locals {
     ]
   ) : []
 
-  all_data_disk_per_dbnode = distinct(concat(local.data_disk_per_dbnode, local.append_disk_per_dbnode))
+  all_data_disk_per_dbnode = distinct(
+    concat(local.data_disk_per_dbnode, local.append_disk_per_dbnode)
+  )
 
   data_disk_list = flatten([
     for vm_counter in range(var.database_server_count) : [
@@ -340,7 +271,11 @@ locals {
 
   db_disks_ansible = distinct(flatten([for vm in range(var.database_server_count) : [
     for idx, datadisk in local.data_disk_list :
-    format("{ host: '%s', LUN: %d, type: '%s' }", var.naming.virtualmachine_names.HANA_COMPUTERNAME[vm], datadisk.lun, datadisk.type)
+    format("{ host: '%s', LUN: %d, type: '%s' }",
+      var.naming.virtualmachine_names.HANA_COMPUTERNAME[vm],
+      datadisk.lun,
+      datadisk.type
+    )
   ]]))
 
   enable_ultradisk = try(
@@ -360,10 +295,47 @@ locals {
   zonal_deployment = local.db_zone_count > 0 || local.enable_ultradisk ? true : false
 
   //If we deploy more than one server in zone put them in an availability set
-  use_avset = var.database_server_count > 0 && !try(local.hdb.no_avset, false) ? !local.zonal_deployment || (var.database_server_count != local.db_zone_count) : false
+  use_avset = var.database_server_count > 0 && !try(local.hdb.no_avset, false) ? (
+    !local.zonal_deployment || (var.database_server_count != local.db_zone_count)) : (
+    false
+  )
 
   //PPG control flag
   no_ppg = var.databases[0].no_ppg
 
+  dns_label               = try(var.landscape_tfstate.dns_label, "")
+  dns_resource_group_name = try(var.landscape_tfstate.dns_resource_group_name, "")
+
+  ANF_pool_settings = var.NFS_provider == "ANF" ? (
+    try(var.landscape_tfstate.ANF_pool_settings, null)
+    ) : (
+    null
+  )
+  database_primary_ips = [
+    {
+      name                          = "IPConfig1"
+      subnet_id                     = var.db_subnet.id
+      nic_ips                       = var.database_vm_db_nic_ips
+      private_ip_address_allocation = var.databases[0].use_DHCP ? "Dynamic" : "Static"
+      offset                        = 0
+      primary                       = !var.use_secondary_ips
+    }
+  ]
+
+  database_secondary_ips = [
+    {
+      name = "IPConfig2"
+      subnet_id                     = var.db_subnet.id
+      nic_ips                       = var.database_vm_db_nic_secondary_ips
+      private_ip_address_allocation = var.databases[0].use_DHCP ? "Dynamic" : "Static"
+      offset                        = var.database_server_count
+      primary                       = var.use_secondary_ips
+    }
+  ]
+
+  database_ips = (var.use_secondary_ips) ? (
+    flatten(concat(local.database_secondary_ips, local.database_primary_ips))) : (
+    local.database_primary_ips
+  )
 
 }

@@ -54,8 +54,8 @@ set -o pipefail
 # Terraform Version settings
 #
 
-if [ ! -n "${TF_VERSION}" ]; then
-  TF_VERSION="1.0.11"
+if [ -z "${TF_VERSION}" ]; then
+  TF_VERSION="1.1.7"
 fi
 
 
@@ -301,6 +301,7 @@ if [[ ! -d "${asad_dir}" ]]; then
     git clone "${asad_repo}" "${asad_dir}"
 fi
 
+chown -R "${USER}" "${asad_dir}"
 #
 # Install terraform for all users
 #
@@ -315,12 +316,12 @@ rel=$(lsb_release -a | grep Release | cut -d':' -f2 | xargs)
 # Ubuntu 20.04 (Focal Fossa) and 20.10 (Groovy Gorilla) include an azure-cli package with version 2.0.81 provided by the universe repository. 
 # This package is outdated and not recommended. If this package is installed, remove the package
 if [ "$rel" == "20.04" ]; then
-  if [ -z /etc/az_removed ]; then
+  if [ ! -f /etc/az_removed ]; then
     echo "Removing Azure CLI"
     sudo apt remove azure-cli -y 
     sudo apt autoremove -y
     sudo apt update -y
-    touch /etc/az_removed
+    sudo touch /etc/az_removed
   fi
 fi
 #
@@ -361,9 +362,6 @@ sudo ${ansible_venv_bin}/pip3 install --upgrade \
     wheel \
     setuptools
 
-# Install latest MicroSoft Authentication Library
-# TODO(rtamalin): Do we need this? In particular do we expect to integrated
-# Rust based tools with the Python/Ansible envs that we are using?
 sudo ${ansible_venv_bin}/pip3 install \
     setuptools-rust
 
@@ -376,7 +374,7 @@ sudo ${ansible_venv_bin}/pip3 install \
     argcomplete \
     'pywinrm>=0.3.0' \
     yamllint \
-    msal
+    netaddr
 
 # Create symlinks for all relevant commands that were installed in the Ansible
 # venv's bin so that they are available in the /opt/ansible/bin directory, which
@@ -429,7 +427,7 @@ if [ -f /tmp/requirements-azure.txt ]; then
   sudo ${ansible_venv_bin}/pip3 install  -r /tmp/requirements-azure.txt 
 fi
 
-curl -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" | jq > vm.json
+curl -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" -s | jq . > vm.json
 
 rg_name=$(jq --raw-output .compute.resourceGroupName vm.json )
 subscription_id=$(jq --raw-output .compute.subscriptionId vm.json)
@@ -456,8 +454,6 @@ echo '# Configure environment settings for deployer interactive session'
 export ARM_SUBSCRIPTION_ID=${subscription_id}
 export DEPLOYMENT_REPO_PATH=$HOME/Azure_SAP_Automated_Deployment/sap-automation
 
-export "PATH=${ansible_bin}:${tf_bin}:"'${PATH}':$HOME/Azure_SAP_Automated_Deployment/sap-automation/deploy/scripts:$HOME/Azure_SAP_Automated_Deployment/sap-automation/deploy/ansible
-
 # Add new /opt bin directories to start of PATH to ensure the versions we installed
 # are preferred over any installed standard system versions.
 
@@ -468,52 +464,56 @@ export ANSIBLE_COLLECTIONS_PATHS=${ansible_collections}
 # Set env for MSI
 export ARM_USE_MSI=true
 
-# Ensure that the user's account is logged in to Azure with specified creds
-az login --identity --output none
-'echo ${USER} account ready for use with Azure SAP Automated Deployment'
-
 #
 # Create /etc/profile.d script to setup environment for future interactive sessions
 #
-echo '# Configure environment settings for deployer interactive sessions' | sudo tee /etc/profile.d/deploy_server.sh
+export PATH="${PATH}":"${ansible_bin}":"${tf_bin}":"${HOME}"/Azure_SAP_Automated_Deployment/sap-automation/deploy/scripts:"${HOME}"/Azure_SAP_Automated_Deployment/sap-automation/deploy/ansible
 
-echo export ARM_SUBSCRIPTION_ID=${subscription_id} | sudo tee -a /etc/profile.d/deploy_server.sh
-echo export DEPLOYMENT_REPO_PATH=$HOME/Azure_SAP_Automated_Deployment/sap-automation | sudo tee -a /etc/profile.d/deploy_server.sh
 
-echo export "PATH=${ansible_bin}:${tf_bin}:"'${PATH}':$HOME/Azure_SAP_Automated_Deployment/sap-automation/deploy/scripts:$HOME/Azure_SAP_Automated_Deployment/sap-automation/deploy/ansible | sudo tee -a /etc/profile.d/deploy_server.sh
+echo "# Configure environment settings for deployer interactive sessions" | tee -a /tmp/deploy_server.sh
 
+echo "export ARM_SUBSCRIPTION_ID=${subscription_id}" | tee -a /tmp/deploy_server.sh
+echo "export DEPLOYMENT_REPO_PATH=$HOME/Azure_SAP_Automated_Deployment/sap-automation" | tee -a  /tmp/deploy_server.sh
+
+echo export "PATH=${ansible_bin}:${tf_bin}:${PATH}:${HOME}/Azure_SAP_Automated_Deployment/sap-automation/deploy/scripts:${HOME}/Azure_SAP_Automated_Deployment/sap-automation/deploy/ansible" | tee -a /tmp/deploy_server.sh
 
 # Set env for ansible
-echo export ANSIBLE_HOST_KEY_CHECKING=False | sudo tee -a /etc/profile.d/deploy_server.sh
-echo export ANSIBLE_COLLECTIONS_PATHS=${ansible_collections} | sudo tee -a /etc/profile.d/deploy_server.sh
+echo "export ANSIBLE_HOST_KEY_CHECKING=False" | tee -a /tmp/deploy_server.sh
+echo "export ANSIBLE_COLLECTIONS_PATHS=${ansible_collections}" | tee -a /tmp/deploy_server.sh
 
 # Set env for MSI
-echo export ARM_USE_MSI=true | sudo tee -a /etc/profile.d/deploy_server.sh
+echo "export ARM_USE_MSI=true" | tee -a /tmp/deploy_server.sh
 
-az login --identity 2>error.log || :
+/usr/bin/az login --identity 2>error.log || :
+# Ensure that the user's account is logged in to Azure with specified creds
 
 if [ ! -f error.log ]; then
-  az account show > az.json
+  /usr/bin/az account show > az.json
   client_id=$(jq --raw-output .id az.json)
   tenant_id=$(jq --raw-output .tenantId az.json)
   rm az.json
 else
   client_id=''
   tenant_id=''
-
 fi
 
-if [ ! -n "${client_id}" ]; then
+if [ -n "${client_id}" ]; then
   export ARM_CLIENT_ID=${client_id}
-  echo export ARM_CLIENT_ID=${client_id} | sudo tee -a /etc/profile.d/deploy_server.sh
+  echo "export ARM_CLIENT_ID=${client_id}" | tee -a /tmp/deploy_server.sh
 fi
 
-if [ ! -n "${tenant_id}" ]; then
+if [ -n "${tenant_id}" ]; then
   export ARM_TENANT_ID=${tenant_id}
-  echo export ARM_TENANT_ID=${tenant_id} | sudo tee -a /etc/profile.d/deploy_server.sh
+  echo "export ARM_TENANT_ID=${tenant_id}" | tee -a /tmp/deploy_server.sh
 fi
 
 # Ensure that the user's account is logged in to Azure with specified creds
-echo az login --identity --output none | sudo tee -a /etc/profile.d/deploy_server.sh
-echo 'echo ${USER} account ready for use with Azure SAP Automated Deployment' | sudo tee -a /etc/profile.d/deploy_server.sh
+echo "az login --identity --output none" | tee -a /tmp/deploy_server.sh
+echo 'echo ${USER} account ready for use with Azure SAP Automated Deployment' | tee -a /tmp/deploy_server.sh
+
+sudo cp /tmp/deploy_server.sh /etc/profile.d/deploy_server.sh
+
+/usr/bin/az login --identity --output none
+echo "${USER} account ready for use with Azure SAP Automated Deployment"
+
 
