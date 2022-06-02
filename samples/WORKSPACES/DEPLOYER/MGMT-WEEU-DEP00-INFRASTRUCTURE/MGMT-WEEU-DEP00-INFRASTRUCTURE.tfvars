@@ -77,7 +77,7 @@ management_subnet_address_prefix="10.10.20.64/28"
 #########################################################################################
 
 # firewall_deployment is a boolean flag controlling if an Azure firewall is to be deployed in the deployer VNet
-firewall_deployment=true
+firewall_deployment=false
 
 # management_firewall_subnet_arm_id is an optional parameter that if provided specifies 
 # Azure resource identifier for the existing firewall subnet
@@ -192,7 +192,7 @@ deployer_authentication_username="azureadm"
 #########################################################################################
 
 # assign_subscription_permissions is a boolean flag controlling if the deployment credential should be assigned Contribuor permissions on the subscription
-#assign_subscription_permissions=true
+assign_subscription_permissions=true
 
 # use_private_endpoint is a boolean flag controlling if the keyvaults and storage accounts have private endpoints
 # use_private_endpoint=false
