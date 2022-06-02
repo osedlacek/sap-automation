@@ -294,8 +294,28 @@ function set_executing_user_environment_variables() {
         # if you are executing as user, we do not want to set any exports for terraform
         echo -e "\t[set_executing_user_environment_variables]: Identified login type as 'user'"
         
-        unset_executing_user_environment_variables
+        # BEGIN WORKAROUND for failing coalsce error and setting ARM* variables instead
+        echo -e "\t[set_executing_user_environment_variables]: Using WORKAROUND and setting ARM* variables"
+        #unset_executing_user_environment_variables ###COMMENTED OUT###
+
+        #export the environment variables
         
+        #ARM_SUBSCRIPTION_ID=${az_subscription_id}
+        ARM_TENANT_ID=${az_tenant_id}
+        ARM_CLIENT_ID=${az_exec_user_name}
+        if [ "none" != "$az_client_secret" ]; then
+            
+            ARM_CLIENT_SECRET=${az_client_secret}
+        fi
+        
+        echo -e "\t[set_executing_user_environment_variables]: exporting environment variables"
+        #export ARM_SUBSCRIPTION_ID
+        export ARM_TENANT_ID
+        export ARM_CLIENT_ID
+        export ARM_CLIENT_SECRET
+
+        ### END WORKAROUND
+
         az_user_obj_id=$(az ad signed-in-user show --query id -o tsv)
         az_user_name=$(az ad signed-in-user show --query userPrincipalName -o tsv)
         
